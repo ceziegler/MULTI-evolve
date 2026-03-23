@@ -217,7 +217,6 @@ def score_double_mutants_esm(wt_seq, double_mutants, scoring_strategy='wt-margin
         DataFrame with double mutant ESM scores
     """
     from esm import pretrained
-    from multievolve.utils.zeroshot_utils import get_device
 
     if model_locations is None:
         model_locations = [
@@ -229,8 +228,7 @@ def score_double_mutants_esm(wt_seq, double_mutants, scoring_strategy='wt-margin
             'esm2_t36_3B_UR50D'
         ]
 
-    # Set device (use get_device to avoid MPS segfaults)
-    device = get_device()
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # First, compute wild-type token probabilities for each model
     print("  Computing wild-type token probabilities...")
