@@ -1,0 +1,14 @@
+torch>=2.1.0
+numpy>=1.26
+pandas>=2.2
+matplotlib>=3.10
+seaborn>=0.13
+scipy>=1.15
+biopython>=1.85
+scikit-learn>=1.6
+scikit-optimize>=0.10
+wandb>=0.19
+Levenshtein
+streamlit>=1.45
+fair-esm
+biotite>=0.41.2

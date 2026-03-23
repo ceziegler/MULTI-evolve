@@ -1,0 +1,21 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": ["--wt-file", 
+            "/Users/m342397/Library/CloudStorage/OneDrive-MerckGroup/Documents/Ab/small_binder_cd45_optimization/d3_4/d3_4_wt.fasta.txt" ,
+            "--pdb-file", "/Users/m342397/Library/CloudStorage/OneDrive-MerckGroup/Documents/Ab/small_binder_cd45_optimization/d3_4/CD45_d3-d4_l183_s930227_mpnn5_model_0_relaxed.pdb", 
+            "--chain-id", "B", 
+            "--excluded-positions", "184-201", "--double", "30"
+]
+        }
+    ]
+}
