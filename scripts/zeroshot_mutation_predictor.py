@@ -721,8 +721,11 @@ def main():
         else:
             print("  Warning: No groups with >= 5 samples for ESM-IF z-score calculation")
 
-    # Sort output by ESM FC rank (primary ranking)
-    result_df = result_df.sort_values(by='esm_fc_rank')
+    # Sort output by ranking (use ESM-IF FC when structure provided, else ESM FC)
+    if 'esmif_fc_rank' in result_df.columns:
+        result_df = result_df.sort_values(by='esmif_fc_rank')
+    else:
+        result_df = result_df.sort_values(by='esm_fc_rank')
 
     # Save single mutant results
     result_df.to_csv(output_file, index=False)
@@ -916,8 +919,11 @@ def main():
                 else:
                     print("  Warning: No groups with >= 5 samples for double mutant ESM-IF z-score calculation")
 
-            # Sort output by ESM FC rank (primary ranking)
-            double_df = double_df.sort_values(by='esm_fc_rank')
+            # Sort output by ranking (use ESM-IF FC when structure provided, else ESM FC)
+            if 'esmif_fc_rank' in double_df.columns:
+                double_df = double_df.sort_values(by='esmif_fc_rank')
+            else:
+                double_df = double_df.sort_values(by='esm_fc_rank')
 
             # Save double mutant results
             double_output = output_file.replace('.csv', '_doubles.csv')
