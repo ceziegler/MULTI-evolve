@@ -19,9 +19,9 @@ Ranking Strategies:
 - ESM-IF FC: Direct ranking by FC score
 - Z-scores: Direct ranking by z-score (both methods)
 
-Sampling Approaches:
-- Top n: Select top n mutations from ranked list
-- Position-exclusive: Select top n mutations with one per position
+Double Mutants:
+- Use --double N to take the top N single mutants and generate all pairwise combinations
+- Singles are ranked by ESM-IF FC if structure is provided, otherwise by ESM FC
 
 Example usage (sequence-only):
     python scripts/zeroshot_mutation_predictor.py \
@@ -33,21 +33,15 @@ Example usage (with structure):
         --pdb-file proteins/my_protein/structure.pdb \
         --chain-id A
 
-Example with sampling:
-    python scripts/zeroshot_mutation_predictor.py \
-        --wt-file proteins/my_protein/wt.fasta \
-        --pdb-file proteins/my_protein/structure.pdb \
-        --n-variants 24
-
 Example excluding specific positions (supports ranges):
     python scripts/zeroshot_mutation_predictor.py \
         --wt-file proteins/my_protein/wt.fasta \
         --excluded-positions 1,14,41-50,112
 
-Example generating all double mutants:
+Example generating double mutants from top 20 singles:
     python scripts/zeroshot_mutation_predictor.py \
         --wt-file proteins/my_protein/wt.fasta \
-        --double
+        --double 20
 """
 
 import argparse
@@ -110,16 +104,10 @@ def parse_args():
     )
     parser.add_argument(
         '--double',
-        action='store_true',
-        help='Generate all possible double mutants and run full ESM scoring on each'
-    )
-    parser.add_argument(
-        '--n-variants',
         type=int,
-        required=False,
         default=None,
         metavar='N',
-        help='Number of top variants to sample from each ranking method'
+        help='Take top N single mutants (ranked by ESM-IF FC if structure provided, else ESM FC) and generate all possible double mutant combinations'
     )
     parser.add_argument(
         '--z-score-grouping',
@@ -270,64 +258,6 @@ def rank_by_zscore(df, z_col, rank_col_name):
     df = df.sort_values(by=z_col, ascending=False)
     df[rank_col_name] = range(1, len(df) + 1)
     return df
-
-
-def sample_top_n(df, n, rank_col):
-    """
-    Sample top n mutations from ranked list.
-
-    Sampling approach 1: M = {(i, x'_i) ∈ R : rank((i, x'_i)) ≤ n}
-
-    Args:
-        df: DataFrame sorted by ranking
-        n: Number of mutations to sample
-        rank_col: Column containing rank values
-
-    Returns:
-        DataFrame with top n mutations
-    """
-    return df[df[rank_col] <= n].copy()
-
-
-def sample_position_exclusive(df, n, rank_col, excluded_positions=None):
-    """
-    Sample top n mutations with position-specific exclusivity.
-
-    Sampling approach 2: Select top n mutations while enforcing that only
-    one mutation per position is included.
-
-    M = {(i, x'_i) ∈ R : |M| ≤ n ∧ ∄(i, y_i) ∈ R where rank((i, y_i)) > rank((i, x'_i))}
-
-    Args:
-        df: DataFrame sorted by ranking
-        n: Number of mutations to sample
-        rank_col: Column containing rank values
-        excluded_positions: List of positions to exclude
-
-    Returns:
-        DataFrame with top n position-exclusive mutations
-    """
-    if excluded_positions is None:
-        excluded_positions = []
-
-    sampled = []
-    used_positions = set(excluded_positions)
-
-    # Ensure sorted by rank
-    df_sorted = df.sort_values(by=rank_col)
-
-    for _, row in df_sorted.iterrows():
-        pos = row['pos']
-        if pos not in used_positions:
-            sampled.append(row)
-            used_positions.add(pos)
-        if len(sampled) >= n:
-            break
-
-    if sampled:
-        return pd.DataFrame(sampled)
-    else:
-        return pd.DataFrame()
 
 
 def rename_esm_columns(df):
@@ -724,111 +654,25 @@ def main():
     result_df.to_csv(output_file, index=False)
     print(f"\nSaved single mutant predictions to: {output_file}")
 
-    # ===========================================
-    # SAMPLING: Generate sampled variant lists
-    # ===========================================
-    if args.n_variants:
-        print(f"\n=== Sampling Top {args.n_variants} Variants ===")
-        wt_dir = os.path.dirname(output_file)
-        if not wt_dir:
-            wt_dir = '.'
-
-        sampling_results = {}
-
-        # ESM FC sampling (both methods)
-        print("Sampling from ESM FC ranking...")
-        esm_fc_top_n = sample_top_n(result_df, args.n_variants, 'esm_fc_rank')
-        esm_fc_pos_excl = sample_position_exclusive(
-            result_df, args.n_variants, 'esm_fc_rank', args.excluded_positions
-        )
-        sampling_results['esm_fc_top_n'] = esm_fc_top_n
-        sampling_results['esm_fc_position_exclusive'] = esm_fc_pos_excl
-
-        # ESM-IF FC sampling
-        if 'esmif_fc_rank' in result_df.columns:
-            print("Sampling from ESM-IF FC ranking...")
-            esmif_fc_top_n = sample_top_n(result_df, args.n_variants, 'esmif_fc_rank')
-            esmif_fc_pos_excl = sample_position_exclusive(
-                result_df, args.n_variants, 'esmif_fc_rank', args.excluded_positions
-            )
-            sampling_results['esmif_fc_top_n'] = esmif_fc_top_n
-            sampling_results['esmif_fc_position_exclusive'] = esmif_fc_pos_excl
-
-        # ESM Z-score sampling
-        if 'esm_z_rank' in result_df.columns:
-            print("Sampling from ESM Z-score ranking...")
-            esm_z_valid = result_df[result_df['esm_z_rank'].notna()].copy()
-            esm_z_top_n = sample_top_n(esm_z_valid, args.n_variants, 'esm_z_rank')
-            esm_z_pos_excl = sample_position_exclusive(
-                esm_z_valid, args.n_variants, 'esm_z_rank', args.excluded_positions
-            )
-            sampling_results['esm_z_top_n'] = esm_z_top_n
-            sampling_results['esm_z_position_exclusive'] = esm_z_pos_excl
-
-        # ESM-IF Z-score sampling
-        if 'esmif_z_rank' in result_df.columns:
-            print("Sampling from ESM-IF Z-score ranking...")
-            esmif_z_valid = result_df[result_df['esmif_z_rank'].notna()].copy()
-            esmif_z_top_n = sample_top_n(esmif_z_valid, args.n_variants, 'esmif_z_rank')
-            esmif_z_pos_excl = sample_position_exclusive(
-                esmif_z_valid, args.n_variants, 'esmif_z_rank', args.excluded_positions
-            )
-            sampling_results['esmif_z_top_n'] = esmif_z_top_n
-            sampling_results['esmif_z_position_exclusive'] = esmif_z_pos_excl
-
-        # Save sampled variants
-        sampled_output = output_file.replace('.csv', '_sampled.csv')
-
-        # Create combined sampling summary
-        all_sampled_mutations = set()
-        sampling_flags = []
-
-        for method_name, sampled_df in sampling_results.items():
-            if len(sampled_df) > 0:
-                for mut in sampled_df['mutations'].values:
-                    all_sampled_mutations.add(mut)
-
-        # Build summary dataframe with sampling flags
-        summary_rows = []
-        for mut in all_sampled_mutations:
-            row = {'mutations': mut}
-            for method_name, sampled_df in sampling_results.items():
-                row[method_name] = 1 if mut in sampled_df['mutations'].values else 0
-            summary_rows.append(row)
-
-        if summary_rows:
-            summary_df = pd.DataFrame(summary_rows)
-            # Merge with scores from result_df
-            score_cols = ['mutations', 'esm_average_logratio', 'esm_total_pass', 'esm_fc_rank']
-            if 'esmif_logratio' in result_df.columns:
-                score_cols.extend(['esmif_logratio', 'esmif_fc_rank'])
-            if 'esm_z_score' in result_df.columns:
-                score_cols.extend(['esm_z_score', 'esm_z_rank'])
-            if 'esmif_z_score' in result_df.columns:
-                score_cols.extend(['esmif_z_score', 'esmif_z_rank'])
-
-            summary_df = summary_df.merge(
-                result_df[score_cols].drop_duplicates(),
-                on='mutations',
-                how='left'
-            )
-            summary_df.to_csv(sampled_output, index=False)
-            print(f"Saved sampled variants to: {sampled_output}")
-
-            # Print sampling summary
-            print(f"\nSampling Summary:")
-            print(f"  Total unique mutations sampled: {len(all_sampled_mutations)}")
-            for method_name, sampled_df in sampling_results.items():
-                print(f"  {method_name}: {len(sampled_df)} mutations")
-
     # Generate and score double mutants if requested
     double_df = None
     if args.double:
         print(f"\n=== Double Mutant Analysis ===")
-        print(f"Generating all possible double mutant combinations...")
 
-        # Generate double mutant combinations
-        double_mutants = generate_double_mutant_combinations(result_df)
+        # Sort by best ranking (ESM-IF FC if structure provided, else ESM FC)
+        if 'esmif_fc_rank' in result_df.columns:
+            rank_col = 'esmif_fc_rank'
+            print(f"Selecting top {args.double} single mutants by ESM-IF FC ranking...")
+        else:
+            rank_col = 'esm_fc_rank'
+            print(f"Selecting top {args.double} single mutants by ESM FC ranking...")
+
+        # Take top N single mutants
+        top_singles = result_df.nsmallest(args.double, rank_col).copy()
+        print(f"Selected {len(top_singles)} single mutants for double combinations")
+
+        # Generate double mutant combinations from top singles only
+        double_mutants = generate_double_mutant_combinations(top_singles)
         print(f"Generated {len(double_mutants)} double mutant combinations")
 
         if double_mutants:
@@ -922,84 +766,6 @@ def main():
             double_output = output_file.replace('.csv', '_doubles.csv')
             double_df.to_csv(double_output, index=False)
             print(f"\nSaved double mutant predictions to: {double_output}")
-
-            # ===========================================
-            # SAMPLING: Generate sampled double mutant lists
-            # ===========================================
-            if args.n_variants:
-                print(f"\n=== Sampling Top {args.n_variants} Double Mutants ===")
-
-                double_sampling_results = {}
-
-                # ESM FC sampling (top n only, no position-exclusive for doubles)
-                print("Sampling from ESM FC ranking...")
-                double_esm_fc_top_n = sample_top_n(double_df, args.n_variants, 'esm_fc_rank')
-                double_sampling_results['esm_fc_top_n'] = double_esm_fc_top_n
-
-                # ESM-IF FC sampling
-                if 'esmif_fc_rank' in double_df.columns:
-                    print("Sampling from ESM-IF FC ranking...")
-                    double_esmif_fc_top_n = sample_top_n(double_df, args.n_variants, 'esmif_fc_rank')
-                    double_sampling_results['esmif_fc_top_n'] = double_esmif_fc_top_n
-
-                # ESM Z-score sampling
-                if 'esm_z_rank' in double_df.columns:
-                    print("Sampling from ESM Z-score ranking...")
-                    double_esm_z_valid = double_df[double_df['esm_z_rank'].notna()].copy()
-                    if len(double_esm_z_valid) > 0:
-                        double_esm_z_top_n = sample_top_n(double_esm_z_valid, args.n_variants, 'esm_z_rank')
-                        double_sampling_results['esm_z_top_n'] = double_esm_z_top_n
-
-                # ESM-IF Z-score sampling
-                if 'esmif_z_rank' in double_df.columns:
-                    print("Sampling from ESM-IF Z-score ranking...")
-                    double_esmif_z_valid = double_df[double_df['esmif_z_rank'].notna()].copy()
-                    if len(double_esmif_z_valid) > 0:
-                        double_esmif_z_top_n = sample_top_n(double_esmif_z_valid, args.n_variants, 'esmif_z_rank')
-                        double_sampling_results['esmif_z_top_n'] = double_esmif_z_top_n
-
-                # Save sampled double mutants
-                double_sampled_output = output_file.replace('.csv', '_doubles_sampled.csv')
-
-                # Create combined sampling summary for doubles
-                all_double_sampled = set()
-                for method_name, sampled_df in double_sampling_results.items():
-                    if len(sampled_df) > 0:
-                        for mut in sampled_df['mutations'].values:
-                            all_double_sampled.add(mut)
-
-                # Build summary dataframe with sampling flags
-                double_summary_rows = []
-                for mut in all_double_sampled:
-                    row = {'mutations': mut}
-                    for method_name, sampled_df in double_sampling_results.items():
-                        row[method_name] = 1 if mut in sampled_df['mutations'].values else 0
-                    double_summary_rows.append(row)
-
-                if double_summary_rows:
-                    double_summary_df = pd.DataFrame(double_summary_rows)
-                    # Merge with scores from double_df
-                    double_score_cols = ['mutations', 'single1', 'single2', 'esm_average_logratio', 'esm_total_pass', 'esm_fc_rank']
-                    if 'esmif_logratio' in double_df.columns:
-                        double_score_cols.extend(['esmif_logratio', 'esmif_fc_rank'])
-                    if 'esm_z_score' in double_df.columns:
-                        double_score_cols.extend(['esm_z_score', 'esm_z_rank'])
-                    if 'esmif_z_score' in double_df.columns:
-                        double_score_cols.extend(['esmif_z_score', 'esmif_z_rank'])
-
-                    double_summary_df = double_summary_df.merge(
-                        double_df[double_score_cols].drop_duplicates(),
-                        on='mutations',
-                        how='left'
-                    )
-                    double_summary_df.to_csv(double_sampled_output, index=False)
-                    print(f"Saved sampled double mutants to: {double_sampled_output}")
-
-                    # Print sampling summary
-                    print(f"\nDouble Mutant Sampling Summary:")
-                    print(f"  Total unique double mutants sampled: {len(all_double_sampled)}")
-                    for method_name, sampled_df in double_sampling_results.items():
-                        print(f"  {method_name}: {len(sampled_df)} mutations")
 
     # Print summary statistics
     print("\n=== Single Mutant Summary ===")
