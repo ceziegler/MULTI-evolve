@@ -44,10 +44,10 @@ Example excluding specific positions (supports ranges):
         --wt-file proteins/my_protein/wt.fasta \
         --excluded-positions 1,14,41-50,112
 
-Example generating double mutants from top 30 singles:
+Example generating all double mutants:
     python scripts/zeroshot_mutation_predictor.py \
         --wt-file proteins/my_protein/wt.fasta \
-        --double 30
+        --double
 """
 
 import argparse
@@ -110,11 +110,8 @@ def parse_args():
     )
     parser.add_argument(
         '--double',
-        type=int,
-        required=False,
-        default=None,
-        metavar='N',
-        help='Generate double mutants from top N single mutants and run full ESM scoring on each'
+        action='store_true',
+        help='Generate all possible double mutants and run full ESM scoring on each'
     )
     parser.add_argument(
         '--n-variants',
@@ -370,29 +367,22 @@ def apply_mutations_to_sequence(wt_seq, mutations):
     return ''.join(seq_list)
 
 
-def generate_double_mutant_combinations(single_df, n_top):
+def generate_double_mutant_combinations(single_df):
     """
-    Generate double mutant combinations from top N single mutants.
-
-    Uses ESM FC two-tier ranking to select top singles:
-    - First by esm_total_pass (consensus)
-    - Then by esm_average_logratio (magnitude)
+    Generate all possible double mutant combinations from single mutants.
 
     Args:
         single_df: DataFrame with single mutant scores (must have 'mutations' and 'pos' columns)
-        n_top: Number of top single mutants to combine
 
     Returns:
         List of tuples: (double_mut_id, single1, single2)
     """
-    # Get top N single mutants using ESM FC ranking
-    ranked_df = rank_esm_fc(single_df)
-    top_singles = ranked_df.head(n_top).copy()
-
     double_mutants = []
-    for i, j in combinations(range(len(top_singles)), 2):
-        row1 = top_singles.iloc[i]
-        row2 = top_singles.iloc[j]
+    seen = set()
+
+    for i, j in combinations(range(len(single_df)), 2):
+        row1 = single_df.iloc[i]
+        row2 = single_df.iloc[j]
 
         pos1 = row1['pos']
         pos2 = row2['pos']
@@ -409,7 +399,10 @@ def generate_double_mutant_combinations(single_df, n_top):
             mut_id = f"{row2['mutations']}_{row1['mutations']}"
             single1, single2 = row2['mutations'], row1['mutations']
 
-        double_mutants.append((mut_id, single1, single2))
+        # Avoid duplicates
+        if mut_id not in seen:
+            seen.add(mut_id)
+            double_mutants.append((mut_id, single1, single2))
 
     return double_mutants
 
@@ -832,10 +825,10 @@ def main():
     double_df = None
     if args.double:
         print(f"\n=== Double Mutant Analysis ===")
-        print(f"Generating combinations from top {args.double} single mutants...")
+        print(f"Generating all possible double mutant combinations...")
 
         # Generate double mutant combinations
-        double_mutants = generate_double_mutant_combinations(result_df, args.double)
+        double_mutants = generate_double_mutant_combinations(result_df)
         print(f"Generated {len(double_mutants)} double mutant combinations")
 
         if double_mutants:
